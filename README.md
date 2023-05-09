@@ -1,15 +1,24 @@
-# go-fail
-HTTP Server that fails when needed
+# go-tcp-test
+Test app for Cloud Foundry app livecycle & health check debugging.
+
 
 ## What it does
-The program offers a `/fail` endpoint that allows you to set a probability `p` that the HTTP request will fail.
-"failing" in this sense means the client does not receive a HTTP response at all. It does NOT mean returning a status 500 or whatever
-as that technically does not "fail" on a TCP level. The failure actually crashes the app as this is the cheapest way to abort the connection.
-It relies on an outer health check to resurrect the app.
+The app offers various endpoints that allow for fine control over its health state & responses on TCP level.
 
-## Why is it useful?
-The primary use is for load balancing backend resiliency tests.
-E.g. what happens if 1 out of 3 instances fail? Does the load balancer retry on another one? Will it disable the broken instance for a while? How many retries does it? etc.
+### `/togglehealth`:
+Toggles App Health State and returns new app health state.
+### `/health`:
+Returns a `200` if the app is healthy, drops/closes the connection otherwise.   
+
+### `/drop`:
+Always drops the Connection. Results in Gorouter error-code `502` with `x_cf_routererror:"endpoint_failure (EOF (via idempotent request))"`.
+
+### `/always_up`:
+Always returns a `200` response even when the app is unhealthy.
+
+### All others
+Returns a `200` if the app is healthy, drops/closes the connection otherwise.
+Also writes the HTTP Method into the response
 
 ## How to build
 ```
@@ -17,11 +26,29 @@ go build
 ```
 
 ## How to run
-You can either just run the binary or push it to CloudFoundry with the given `manifest.yml`
+Either run the binary or push it to CloudFoundry with the given `manifest.yml`.
+
+Use `health-check-type: process` for [process healthchecks](https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#types), or the following for HTTP health checks:
+```yaml
+    health-check-type: http
+    health-check-http-endpoint: /health
+```
+
+The following environment variables affect the apps behaviour and can be specified in the manifest (see example).
+
+### `START_STOP_DELAY`
+If a duration is specified here (e.g. "10s", "5m"), the app will wait for the specified amount
+- before listening (on port `8080` by default) after startup
+- before exiting after receiving a `SIGINT` or `SIGTERM` signal.
+### `INSTANT_CLOSE_LISTENER`
+If `INSTANT_CLOSE_LISTENER` is set to `true`, the app will stop listening on port 8080 immediately after `SIGINT` or `SIGTERM` is received.
+
+It will still wait the amount of time specified in `START_STOP_DELAY` before completely exiting.
+
+### `INITIAL_HEALTH`
+If `INITIAL_HEALTH: false` is specified, the app will start with failing Health endpoint (i.e. `cf push` will fail)
 
 ## How to use
-You can provide a URL parameter `p` to set the probability of the app to fail.
-```
-curl http://myhost:8080/fail?p=25
-```
-e.g. this would fail in 25% of requests.
+After pushing the app to CF, use `cf logs <appname>` to see the detailed log output of every request/health-check/event.
+## References
+- [Health Check Livecycle in CF Docs](https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#healthcheck-lifecycle)
