@@ -4,23 +4,23 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
+	"net"
 	"os"
 	"os/signal"
-	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 func main() {
-	appIsHealthy := true
+	//appIsHealthy := true
 	rand.Seed(time.Now().Unix())
 	port, ok := os.LookupEnv("PORT")
 	if !ok {
 		port = "8080"
 	}
 
-	index, _ := os.LookupEnv("CF_INSTANCE_INDEX")
+	//index, _ := os.LookupEnv("CF_INSTANCE_INDEX")
 
 	var startStopDelay time.Duration
 	startStopDelayString, ok := os.LookupEnv("START_STOP_DELAY")
@@ -35,96 +35,12 @@ func main() {
 	time.Sleep(startStopDelay)
 	log.Printf("done waiting")
 
-	mux := setupMux(index, &appIsHealthy)
-
 	log.Printf("Listening on :%s", port)
-	go http.ListenAndServe(fmt.Sprintf(":%s", port), mux)
 
-	setupAppStop(startStopDelay)
+	//go setupAppStop(startStopDelay)
 
-}
+	setupTcpServer()
 
-func setupMux(index string, appIsHealthy *bool) *http.ServeMux {
-
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
-		if *appIsHealthy {
-			writer.WriteHeader(200)
-			writer.Write([]byte("all is well"))
-		} else {
-			writer.WriteHeader(404)
-			writer.Write([]byte("feeling a bit under the weather"))
-		}
-
-	})
-	mux.HandleFunc("/fail", func(w http.ResponseWriter, req *http.Request) {
-
-		q := req.URL.Query()
-		p, _ := strconv.Atoi(q.Get("p"))
-		r := rand.Intn(100)
-		if p < 0 {
-			p = 0
-		}
-		if p > 100 {
-			p = 100
-		}
-		if r < p {
-			log.Fatalf("%d < %d - CRASH!\n", r, p)
-		}
-
-		i := q.Get("i")
-		if i == index {
-			log.Fatalf("instance %s = i %s - CRASH!\n", index, i)
-		}
-
-		w.WriteHeader(200)
-		w.Write([]byte(fmt.Sprintf("(instance: %s) %d >= %d - OK\n", index, r, p)))
-		log.Printf("(instance: %s) %d >= %d - OK\n", index, r, p)
-	})
-	mux.HandleFunc("/drop", func(w http.ResponseWriter, req *http.Request) {
-
-		q := req.URL.Query()
-		p, _ := strconv.Atoi(q.Get("p"))
-		r := rand.Intn(100)
-		if p < 0 {
-			p = 0
-		}
-		if p > 100 {
-			p = 100
-		}
-		if r < p {
-			req.Context().Done()
-		}
-
-		i := q.Get("i")
-		if i == index {
-			req.Context().Done()
-			log.Fatalf("instance %s = i %s - CRASH!\n", index, i)
-		}
-
-		w.WriteHeader(200)
-		w.Write([]byte(fmt.Sprintf("(instance: %s) %d >= %d - OK\n", index, r, p)))
-		log.Printf("(instance: %s) %d >= %d - OK\n", index, r, p)
-	})
-	mux.HandleFunc("/drop_if_unhealthy", func(w http.ResponseWriter, req *http.Request) {
-		if *appIsHealthy {
-			w.WriteHeader(200)
-			w.Write([]byte("app is healthy - returning 200"))
-		} else {
-			req.Context().Done()
-		}
-	})
-	mux.HandleFunc("/toggle_health", func(w http.ResponseWriter, req *http.Request) {
-		w.WriteHeader(200)
-		*appIsHealthy = !*appIsHealthy
-		if *appIsHealthy {
-			w.Write([]byte("app will report healthy"))
-		} else {
-			w.Write([]byte("app will report UN-healthy"))
-		}
-	})
-	return mux
 }
 
 func setupAppStop(startStopDelay time.Duration) {
@@ -135,9 +51,56 @@ func setupAppStop(startStopDelay time.Duration) {
 	signal.Notify(signals, syscall.SIGTERM)
 
 	// Wait for a SIGINT signal
-	fmt.Println("Waiting for SIGTERM signal...")
+	log.Println("Waiting for SIGTERM signal...")
 	<-signals
-	fmt.Println("SIGTERM signal received. Shutting down...")
+	log.Println("SIGTERM signal received. Shutting down...")
 
+	log.Printf("sleeping for %s before exiting\n", startStopDelay)
 	time.Sleep(startStopDelay)
+
+}
+
+func setupTcpServer() {
+	// Listen for incoming connections on port 8080
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Infinite loop to handle incoming connections
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		// Handle incoming connection in a separate goroutine
+		go handleConnection(conn)
+	}
+}
+
+func handleConnection(conn net.Conn) {
+	// Close the connection when this function exits
+	defer conn.Close()
+
+	// Create a buffer to read incoming data
+	buf := make([]byte, 1024)
+	_, err := conn.Read(buf)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Check if the incoming data is an HTTP request
+	if strings.HasPrefix(string(buf), "GET /") {
+		// Respond with a simple HTTP response
+		response := "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello, World!"
+		conn.Write([]byte(response))
+	} else {
+		// Respond with an error message
+		response := "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid request"
+		conn.Write([]byte(response))
+	}
 }
