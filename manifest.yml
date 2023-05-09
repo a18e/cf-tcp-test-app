@@ -9,5 +9,7 @@ applications:
     instances: 1
     path: .
     env:
-      START_STOP_DELAY: 5s
+      INITIAL_HEALTH: true
+      START_DELAY: 0s
+      STOP_DELAY: 5s
       INSTANT_CLOSE_LISTENER: false

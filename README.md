@@ -5,6 +5,8 @@ Test app for Cloud Foundry app livecycle & health check debugging.
 ## What it does
 The app offers various endpoints that allow for fine control over its health state & responses on TCP level.
 
+It also logs every request it receives, plus various lifecycle events.
+
 ### `/togglehealth`:
 Toggles App Health State and returns new app health state.
 ### `/health`:
@@ -36,19 +38,19 @@ Use `health-check-type: process` for [process healthchecks](https://docs.cloudfo
 
 The following environment variables affect the apps behaviour and can be specified in the manifest (see example).
 
-### `START_STOP_DELAY`
+### `START_DELAY` and `STOP_DELAY`
 If a duration is specified here (e.g. "10s", "5m"), the app will wait for the specified amount
-- before listening (on port `8080` by default) after startup
-- before exiting after receiving a `SIGINT` or `SIGTERM` signal.
+- before listening (on port `8080` by default) during startup (`START_DELAY`)
+- before exiting after receiving a `SIGINT` or `SIGTERM` signal. (`STOP_DELAY`)
 ### `INSTANT_CLOSE_LISTENER`
 If `INSTANT_CLOSE_LISTENER` is set to `true`, the app will stop listening on port 8080 immediately after `SIGINT` or `SIGTERM` is received.
 
-It will still wait the amount of time specified in `START_STOP_DELAY` before completely exiting.
+It will still wait the amount of time specified in `STOP_DELAY` before completely exiting.
 
 ### `INITIAL_HEALTH`
 If `INITIAL_HEALTH: false` is specified, the app will start with failing Health endpoint (i.e. `cf push` will fail)
 
 ## How to use
-After pushing the app to CF, use `cf logs <appname>` to see the detailed log output of every request/health-check/event.
+After pushing the app to CF, use `cf logs go-tcp-test` to see the detailed log output of every request/health-check/event.
 ## References
 - [Health Check Livecycle in CF Docs](https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#healthcheck-lifecycle)

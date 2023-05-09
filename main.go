@@ -14,7 +14,8 @@ import (
 )
 
 var appIsHealthy = true
-var startStopDelay = 0 * time.Second
+var startDelay = 0 * time.Second
+var stopDelay = 0 * time.Second
 
 // immediately closes the listener after app has become unhealthy
 var instantCloseListener = false
@@ -36,16 +37,22 @@ func main() {
 		instantCloseListener = strings.ToLower(closeListenerString) == "true"
 	}
 
-	startStopDelayString, ok := os.LookupEnv("START_STOP_DELAY")
-	if !ok {
-		startStopDelay = 0
+	startDelayString, ok := os.LookupEnv("START_DELAY")
+	if ok {
+		startDelay, err = time.ParseDuration(startDelayString)
+		if err != nil {
+			log.Fatalf("invalid START_STOP_DELAY %s", startDelayString)
+		}
 	}
-	startStopDelay, err = time.ParseDuration(startStopDelayString)
-	if err != nil {
-		log.Fatalf("invalid START_STOP_DELAY %s", startStopDelayString)
+	stopDelayString, ok := os.LookupEnv("STOP_DELAY")
+	if ok {
+		stopDelay, err = time.ParseDuration(stopDelayString)
+		if err != nil {
+			log.Fatalf("invalid START_STOP_DELAY %s", stopDelayString)
+		}
 	}
-	log.Printf("waiting %s for startup\n", startStopDelay)
-	time.Sleep(startStopDelay)
+	log.Printf("waiting %s for startup\n", startDelay)
+	time.Sleep(startDelay)
 	log.Printf("done waiting")
 
 	log.Printf("Listening on :%s | app-health: %t", port, appIsHealthy)
@@ -104,8 +111,8 @@ func setupDelayedShutdown(ln net.Listener, group *sync.WaitGroup) {
 				log.Printf("keeping listener open")
 			}
 
-			log.Printf("sleeping for %v", startStopDelay)
-			time.Sleep(startStopDelay)
+			log.Printf("sleeping for %v", stopDelay)
+			time.Sleep(stopDelay)
 			log.Printf("done sleeping. exiting.")
 			syscall.Exit(0) // we need to syscall exit here in case the incoming connection loop doesn't receive any more connections and doesn't break
 		default:
@@ -138,13 +145,13 @@ func handleConnection(conn net.Conn) {
 	buf := make([]byte, 1024)
 	_, err := conn.Read(buf)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 
 	path, method, err := getHttpPathAndMethod(buf)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 
 	switch path {
@@ -165,6 +172,7 @@ func handleConnection(conn net.Conn) {
 		log.Printf("received drop request. New health: %t", appIsHealthy)
 		conn.Close()
 	case "/always_up":
+		log.Printf("received always_up request: %t", appIsHealthy)
 		response := "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello World!\r\n"
 		conn.Write([]byte(response))
 	default:
