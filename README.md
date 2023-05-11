@@ -1,5 +1,5 @@
 # go-tcp-test
-Test app for Cloud Foundry app livecycle & health check debugging.
+Test app for Cloud Foundry app lifecycle & health check debugging.
 
 
 ## What it does
@@ -46,7 +46,7 @@ If `INITIAL_HEALTH: false` is specified, the app will start with failing Health 
 
 ```mermaid
 flowchart LR
-    start["Process started"]--->|START_DELAY|crash["SIGTERM received"]--->|DRAIN_DELAY|drain["listener stopped"]--->|STOP_DELAY|stop["Process stopped"]
+    start["Process started"]--->|START_DELAY| listens["listener starts"] -.-|App runs| crash["SIGTERM received"]--->|DRAIN_DELAY| drain["listener stopped"]--->|STOP_DELAY| stop["Process stopped"]
     
 ```
 
@@ -55,4 +55,78 @@ flowchart LR
 ## How to use
 After pushing the app to CF, use `cf logs go-tcp-test` to see the detailed log output of every request/health-check/event.
 ## References
-- [Health Check Livecycle in CF Docs](https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#healthcheck-lifecycle)
+- [Health Check Lifecycle in CF Docs](https://docs.cloudfoundry.org/devguide/deploy-apps/healthchecks.html#healthcheck-lifecycle)
+
+## App Lifecycle (WIP)
+
+
+### App Crash: 
+```mermaid
+sequenceDiagram
+    participant re as route_emitter/NATS
+    participant ha as client/HAProxy
+    participant gorouter
+    participant envoy
+    participant executor
+    participant hc as healthcheck (binary)
+    participant app
+
+    activate app
+    activate envoy
+    executor ->>+ hc: Start 
+    
+    loop Every 30s
+        hc ->> app: Health Check
+        app -->> hc: OK
+    end
+
+    note over app: App becomes unhealthy
+    
+    hc -X app: Health Check (tcp or http)
+    opt Improvement Idea?
+    hc->>envoy: shutdown
+    end
+    note over hc: exits (see exit code!)
+    hc ->> executor: exit status
+    deactivate hc
+    
+    activate executor
+    opt Improvement Idea?
+    executor->>envoy: Invalidate Certs
+    end
+    executor->>app: SIGTERM
+    deactivate executor
+        
+    loop
+    alt slow envoy cert invalidation
+    ha ->>+ gorouter: request
+    gorouter ->>+ envoy: request
+    envoy --X- app: request
+    gorouter -->>- ha: 502 error (EOF)
+    ha ->>+ gorouter: request
+    gorouter -->>- ha: 503 error
+    else envoy certs invalidated
+    ha ->>+ gorouter: request
+    gorouter ->>+ envoy: request
+    envoy ->>- gorouter: invalid certs
+    gorouter -->>- ha: 503 error (invalid certs)
+    end
+    
+    note over gorouter: drops route
+    
+    loop
+    ha ->>+ gorouter: request
+    gorouter -->>- ha: 404 error
+    end
+    re -) app: checks state
+    activate re
+    re --) gorouter: publish route
+    deactivate re
+    note over gorouter: adds route
+    end
+    note over app: App Container stops/is restarted
+    
+    deactivate app
+
+```
+
